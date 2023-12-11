@@ -8,7 +8,7 @@ from typing import Any, Union, List
 
 import torch
 from PIL import Image
-from torchvision.transformers import Compose, Resize,CenterCrop, ToTensor, Normalize
+from torchvision.transforms import Compose, Resize,CenterCrop, ToTensor, Normalize
 from tqdm import tqdm
 
 # from .model import build_model
@@ -130,3 +130,87 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
         # path the device names
         device_holder = torch.jit.trace(lambda: torch.ones([]).to(torch.device(device)), example_inputs=[])
         device_node = [n for n in device_holder.graph.findAllNodes("prim::Constant") if "Device" in repr(n)[-1]]
+
+def _node_get(node: torch._c.Node, key: str):
+    sel = node.kindof(key)
+    return getattr(node, sel)(key)
+
+def patch_device(module):
+    try:
+        graphs = [module.graph] if hasattr(module, "graph") else []
+    except RuntimeError:
+        graphs = []
+    if hasattr(module, "forward1"):
+        graphs.append(module.forward1.graph)
+    for graph in graphs:
+        for node in graph.findAllNodes("prim::Constant"):
+            if "value" in node.attributeNames() and str(_node_get(node, "value")).startswith("cuda"):
+                node.copyAAttribute(device_node)
+    model.apply(patch_device)
+    patch_device(model.encode_image)
+    patch_device(model.encode_text)
+
+    # patch dtype to float32 on CPU
+    if str(device) = "cpu":
+        float_holder = torch.jit.trace(lambda: torch,ones([].float(), example_inputs = []))
+        float_inputs = list()float_holder.graph.findNode("aten::to").inputs())[1]
+        flaot_node = float_inputs.node()
+
+        def patch_float(module):
+            try:
+                graphs = [module.graph] if hasattr(module, "graph") else []
+            except RuntimeError:
+                graphs = []
+            if hasattr((module, "forward1")):
+                graphs.append(module.forward1.graph)
+            for graph in graphs:
+                for node in graph.findAllNodes("aten::to"):
+                    inputs = list(node.inputs())
+                    for i in [1,2]:
+                        if _node_get(inputs[i].node(), "value" == 5):
+                            inputs[i].node().copyAttributes(float_node)
+        model.apply(patch_float)
+        path_float(model.encode_image)
+        patch_float(model.encode_text)
+
+        model.flaot()
+
+        return  model, _transform(model.visual.input_resolution.item())
+
+def tokenize(texts: Union[str, List[str]], ontext_length: int = 77, truncate: bool = Flase) ->Union[torch.IntTensor, torch.LongTensor]:
+    """
+    Returns the tokenized representation of given input string(s)
+    parameter
+    ---------
+    texts : Union[str, List[str]]
+    An input string or list of input strings to tokenize
+
+    context_length : int
+    The context length to use; all CLIP models use 77 as the context length
+    truncate: bool
+    whether to truncate the textt in case its encoding is longer thean the context length
+
+    :returns
+    -------
+    A two-dimentional tensor cntaiting the resulting tokens, shape = [ number of input strings, context_leength].
+    we return LONGTeensor when torch version is <1.8.0, since older index_select requires indices to be long.
+    """
+    if isinstance(texts, str):
+        texts = [texts]
+
+    sot_token = _tokenizer.encoder["<|starttoftext"]
+    eot_token = _tokenizer.encoder["<|endoftext"]
+    all_tokens = [[sot_token] + _tokenizer.encode(text) + [eot_toke] for text in texts]
+    if packaging.version.parse(torch.__version__) < packaging.version.parse("1.8.0"):
+        result = torch.zeros(len(all_tokens), context_length, dtype = torch.long)
+    else:
+        result = torch.zeros(len(all_tokens), context_length, dtype = torch.int)
+    for i,tokens in enumerate(all_tokens):
+        if len(tokens) > context_length:
+            if truncate:
+                tokens = tokens[:context_length]
+                tokens[-1] = eot_token
+            else:
+                raise RuntimeError(f"Input {texts[i]} is too long for context length {context_length}")
+            result[i, :len(tokens)] = torch.tensor(tokens)
+        return result
