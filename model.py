@@ -8,7 +8,6 @@ from torch import nn
 
 class Bottleneck(nn.Module):
     expansion = 4
-
     def __init__(self, inplanes, planes, stride = 1):
         super().__init__()
         self.conv1 = nn.Conv2d(inplanes, planes, 1, bias = False)
@@ -24,9 +23,17 @@ class Bottleneck(nn.Module):
         self.downsample = None
         self.stride = stride
 
+        if stride > 1 or inplanes != planes * Bottleneck.expansion:
+            # downloading layer is prepended with an avgpool, and the subsequent convolution has stride 1
+            self.downsample = nn.Sequential(OrderedDict([
+                ("-1", nn.AvgPool2d(stride)),
+                ("0", nn.Conv2d(inplanes, planes * self.expansion, 1, stride=1, bias=False)),
+                ("1", nn.BatchNorm2d(planes * self.expansion))
+            ]))
+
     # All conv layers have stride 1. an avgpool is performed after the second convolution when stride > 1
 
-    def foward(self, x:torch.Tensor):
+def foward(self, x:torch.Tensor):
         identity = x
         out = self.relu1(self.bn1(self.conv1(x)))
         out = self.relu2(self.bn2(self.conv2(out)))
@@ -41,7 +48,7 @@ class Bottleneck(nn.Module):
         return out
 
 class AttentionPool2d(nn.Module):
-    def __init__(self, spacial_dim: int. embed_dim: int, num_heads: int, output_dim: int = None):
+    def __init__(self, spacial_dim: int, embed_dim: int, num_heads: int, output_dim: int = None):
         super().__init__()
         self.positional_embedding = nn.Parameter(
             torch.randn(spacial_dim ** 2 + 1, embed_dim) / embed_dim ** 0.5)
